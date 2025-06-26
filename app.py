@@ -4,7 +4,7 @@ import os
 
 st.set_page_config(page_title="SymSpell Spell Checker")
 
-sym_spell = SymSpell(max_dictionary_edit_distance=6)
+sym_spell = SymSpell(max_dictionary_edit_distance=3)
 
 dictionary_path = "frequency_dictionary_en_82_765.txt"
 if not os.path.exists(dictionary_path):
@@ -12,11 +12,11 @@ if not os.path.exists(dictionary_path):
 else:
     sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
 
-    st.title("🔍 SymSpell Spell Checker")
+    st.title("🔍 Spell Checker using SymSpell")
 
-    user_input = st.text_input("Enter a word:")
+    user_input = st.text_input("Enter a misspelled word here:")
     if user_input:
-        suggestions = sym_spell.lookup(user_input, Verbosity.CLOSEST, max_edit_distance=6)
+        suggestions = sym_spell.lookup(user_input, Verbosity.CLOSEST, max_edit_distance=3)
         if suggestions:
             st.write("Suggestions:")
             for suggestion in suggestions:
