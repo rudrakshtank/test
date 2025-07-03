@@ -19,14 +19,15 @@ def extract_code(url):
         }
 
         session = requests.Session()
-        res = session.get(url, headers=headers)
+        proxy_url = f"https://corsproxy.io/?{url}"
+        res = session.get(proxy_url, headers=headers)
         res.raise_for_status()
 
         soup = BeautifulSoup(res.text, "html.parser")
         code_lines = soup.select("pre#program-source-text ol.linenums > li")
 
         if not code_lines:
-            return None, "❌ Could not find code lines. Check if the submission is public and the URL is valid."
+            return None, "❌ Could not find code lines. Is the submission public?"
 
         code = "\n".join([line.get_text() for line in code_lines])
         return code, None
@@ -36,15 +37,3 @@ def extract_code(url):
     except Exception as e:
         return None, f"⚠️ Error: {str(e)}"
 
-if url:
-    if not url.startswith("https://codeforces.com/contest/") or "/submission/" not in url:
-        st.warning("🚫 Invalid Codeforces submission URL format.")
-    else:
-        with st.spinner("Fetching submission code..."):
-            code, error = extract_code(url)
-
-        if error:
-            st.error(error)
-        else:
-            st.success("✅ Code fetched successfully:")
-            st.code(code, language="cpp")
