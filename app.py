@@ -4,9 +4,16 @@ import os
 import ffmpeg
 import whisper
 from transformers import pipeline
+from huggingface_hub import login
+
+# 🔐 Authenticate Hugging Face
+login("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")  # <-- Replace with your Hugging Face token
 
 st.set_page_config(page_title="Video Insight Extractor", layout="wide")
 st.title("🎥 MP4 Video Insight Extractor")
+
+# Allow larger uploads
+st.set_option('server.maxUploadSize', 1024)  # in MB
 
 video_file = st.file_uploader("Upload MP4 file", type=["mp4"])
 
@@ -25,15 +32,15 @@ if video_file is not None:
             st.error("FFmpeg error: " + str(e))
             st.stop()
 
-    with st.spinner("Transcribing using Whisper..."):
+    with st.spinner("Transcribing with Whisper..."):
         model = whisper.load_model("base")
         result = model.transcribe(audio_path)
         transcript = result["text"]
 
-    st.subheader("📜 Transcript")
-    st.text_area("Full Transcript", transcript, height=200)
+    st.subheader("📜 Full Transcript")
+    st.text_area("Transcription Output", transcript, height=200)
 
-    with st.spinner("Generating summary..."):
+    with st.spinner("Summarizing..."):
         summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
         chunks = [transcript[i:i+1000] for i in range(0, len(transcript), 1000)]
         summary = ""
@@ -49,7 +56,7 @@ if video_file is not None:
     for i, line in enumerate(lines):
         if '?' in line:
             question = line.strip()
-            for j in range(i+1, min(i+3, len(lines))):
+            for j in range(i+1, min(i+4, len(lines))):
                 answer = lines[j].strip()
                 if answer:
                     qa_pairs.append((question, answer))
