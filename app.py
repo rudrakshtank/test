@@ -1,81 +1,67 @@
 import streamlit as st
-from pathlib import Path
+import tempfile
+import os
+import ffmpeg
+import whisper
+from transformers import pipeline
 
-# Attempt to import the core evaluation system.
-try:
-    from teacher_evaluation_ai.main import TeacherEvaluationSystem
-    CORE_AVAILABLE = True
-except ModuleNotFoundError:
-    CORE_AVAILABLE = False
-    st.warning("teacher_evaluation_ai package not found. Core analysis will be disabled.")
+st.set_page_config(page_title="Video Insight Extractor", layout="wide")
+st.title("🎥 MP4 Video Insight Extractor")
 
-st.set_page_config(page_title="AI Teacher Evaluation", layout="wide")
-st.title("📊 AI-Driven Teacher Evaluation System")
+video_file = st.file_uploader("Upload MP4 file", type=["mp4"])
 
-st.sidebar.header("⚙️ Configuration")
-mode = st.sidebar.selectbox("Choose input mode", ("Upload Lesson Recording", "Real-time Webcam"))
+if video_file is not None:
+    with st.spinner("Saving uploaded video..."):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_vid:
+            tmp_vid.write(video_file.read())
+            video_path = tmp_vid.name
 
-MAX_DURATION = st.sidebar.slider("Max analysis duration (minutes)", 1, 60, 30)
-FRAME_STRIDE = st.sidebar.slider("Frame stride (every N frames)", 1, 30, 5)
+    audio_path = video_path.replace(".mp4", ".wav")
 
-if "results" not in st.session_state:
-    st.session_state.results = None
+    with st.spinner("Extracting audio using ffmpeg..."):
+        try:
+            ffmpeg.input(video_path).output(audio_path, acodec='pcm_s16le', ac=1, ar='16000').overwrite_output().run(quiet=True)
+        except ffmpeg.Error as e:
+            st.error("FFmpeg error: " + str(e))
+            st.stop()
 
-if mode == "Upload Lesson Recording":
-    video_file = st.file_uploader("Upload lesson video (MP4)", type=["mp4", "mov", "mkv"])
-    if st.button("Run Analysis") and video_file and CORE_AVAILABLE:
-        with st.spinner("Processing lesson… this may take a while 🕒"):
-            tmp_path = Path("uploaded_video.mp4")
-            tmp_path.write_bytes(video_file.read())
-            system = TeacherEvaluationSystem()
-            st.session_state.results = system.analyze_lesson(str(tmp_path), max_duration_minutes=MAX_DURATION, frame_stride=FRAME_STRIDE)
-        st.success("Analysis complete!")
-elif mode == "Real-time Webcam" and CORE_AVAILABLE:
-    if st.button("Start webcam analysis"):
-        with st.spinner("Analysing webcam feed… press Q in the opened window to quit"):
-            system = TeacherEvaluationSystem()
-            st.session_state.results = system.analyze_real_time(camera_index=0, max_duration_minutes=MAX_DURATION)
-        st.success("Analysis complete!")
+    with st.spinner("Transcribing using Whisper..."):
+        model = whisper.load_model("base")
+        result = model.transcribe(audio_path)
+        transcript = result["text"]
 
-# Display results if available
-if st.session_state.results:
-    results = st.session_state.results
-    rubric = results.get("rubric_evaluation", {})
-    overall = rubric.get("overall_score", 0)
-    st.metric("Overall Effectiveness", f"{overall*100:.0f}%")
+    st.subheader("📜 Transcript")
+    st.text_area("Full Transcript", transcript, height=200)
 
-    # Category breakdown
-    category_scores = rubric.get("category_scores", {})
-    if category_scores:
-        import pandas as pd
-        df = pd.DataFrame({"Category": [c.replace("_", " ").title() for c in category_scores.keys()],
-                           "Score %": [round(v.get("score",0)*100,1) for v in category_scores.values()]})
-        st.bar_chart(df.set_index("Category"))
+    with st.spinner("Generating summary..."):
+        summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+        chunks = [transcript[i:i+1000] for i in range(0, len(transcript), 1000)]
+        summary = ""
+        for chunk in chunks:
+            summary += summarizer(chunk, max_length=100, min_length=30, do_sample=False)[0]['summary_text'] + " "
 
-    # Strengths & improvements
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("🌟 Strengths")
-        for s in rubric.get("strengths", []) or ["No strengths detected"]:
-            st.write(f"✔️ {s}")
-    with col2:
-        st.subheader("🛠️ Areas for Improvement")
-        for s in rubric.get("areas_for_improvement", []) or ["No issues detected"]:
-            st.write(f"❌ {s}")
+    st.subheader("🧠 Key Insights")
+    st.write(summary.strip())
 
-    # Recommendations
-    recs = rubric.get("recommendations", [])
-    if recs:
-        st.subheader("💡 Recommendations")
-        for i, r in enumerate(recs, 1):
-            st.write(f"{i}. {r}")
+    st.subheader("❓ Questions & Answers")
+    lines = transcript.split('.')
+    qa_pairs = []
+    for i, line in enumerate(lines):
+        if '?' in line:
+            question = line.strip()
+            for j in range(i+1, min(i+3, len(lines))):
+                answer = lines[j].strip()
+                if answer:
+                    qa_pairs.append((question, answer))
+                    break
 
-    # Download buttons
-    report = results.get("report", {}) or results.get("report_generation", {})
-    if report:
-        html_bytes = report.get("html", "").encode()
-        text_bytes = report.get("text", "").encode()
-        st.download_button("Download HTML report", data=html_bytes, file_name="evaluation_report.html", mime="text/html")
-        st.download_button("Download text report", data=text_bytes, file_name="evaluation_report.txt", mime="text/plain")
-else:
-    st.info("Upload a video or start real-time analysis to see results.")
+    if qa_pairs:
+        for idx, (q, a) in enumerate(qa_pairs, 1):
+            st.markdown(f"**Q{idx}:** {q}?")
+            st.markdown(f"**A{idx}:** {a}")
+    else:
+        st.info("No Q&A pairs detected.")
+
+    # Cleanup
+    os.remove(video_path)
+    os.remove(audio_path)
